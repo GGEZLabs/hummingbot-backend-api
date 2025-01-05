@@ -11,6 +11,8 @@ services:
     volumes:
       - ./bots:/backend-api/bots
       - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - .env
     environment:
       - BROKER_HOST=emqx
       - BROKER_PORT=1883
