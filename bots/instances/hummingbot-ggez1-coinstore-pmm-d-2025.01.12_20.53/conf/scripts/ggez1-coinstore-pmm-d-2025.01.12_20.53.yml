@@ -1,7 +1,0 @@
-candles_config: []
-config_update_interval: 10
-controllers_config:
-- ggez1-coinstore-pmm-d_0.2.yml
-markets: {}
-script_file_name: v2_with_controllers.py
-time_to_cash_out: null
