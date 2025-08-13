@@ -1,7 +1,9 @@
 services:
   hummingbot-api:
     container_name: hummingbot-api
-    image: hummingbot/hummingbot-api:latest
+    build:
+      context: .. # Use the parent directory (hummingbot_setup_2.7) as the context
+      dockerfile: hummingbot-backend-api/Dockerfile
     ports:
       - "8000:8000"
     volumes:
@@ -15,6 +17,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://hbot:hummingbot-api@postgres:5432/hummingbot_api
     networks:
       - emqx-bridge
+      - shared-network
     depends_on:
       - postgres
   emqx:
@@ -32,19 +35,19 @@ services:
       - emqx-log:/opt/emqx/log
       - emqx-etc:/opt/emqx/etc
     ports:
-      - "1883:1883"  # mqtt:tcp
-      - "8883:8883"  # mqtt:tcp:ssl
-      - "8083:8083"  # mqtt:ws
-      - "8084:8084"  # mqtt:ws:ssl
-      - "8081:8081"  # http:management
-      - "18083:18083"  # http:dashboard
-      - "61613:61613"  # web-stomp gateway
+      - "1883:1883" # mqtt:tcp
+      - "8883:8883" # mqtt:tcp:ssl
+      - "8083:8083" # mqtt:ws
+      - "8084:8084" # mqtt:ws:ssl
+      - "8081:8081" # http:management
+      - "18083:18083" # http:dashboard
+      - "61613:61613" # web-stomp gateway
     networks:
       emqx-bridge:
         aliases:
           - node1.emqx.local
     healthcheck:
-      test: [ "CMD", "/opt/emqx/bin/emqx_ctl", "status" ]
+      test: ["CMD", "/opt/emqx/bin/emqx_ctl", "status"]
       interval: 5s
       timeout: 25s
       retries: 5
@@ -69,11 +72,13 @@ services:
       retries: 5
 
 networks:
+  shared-network:
+    external: true
   emqx-bridge:
     driver: bridge
 
 volumes:
-  emqx-data: { }
-  emqx-log: { }
-  emqx-etc: { }
-  postgres-data: { }
+  emqx-data: {}
+  emqx-log: {}
+  emqx-etc: {}
+  postgres-data: {}

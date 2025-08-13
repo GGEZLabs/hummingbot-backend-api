@@ -1,56 +1,43 @@
-# Stage 1: Builder stage
-FROM continuumio/miniconda3 AS builder
+# =================================================================
+# STAGE 1: Builder - Builds a compatible .whl file
+# =================================================================
+FROM continuumio/miniconda3:latest AS builder
 
-# Install build dependencies
-RUN apt-get update && \
-    apt-get install -y python3-dev gcc && \
-    rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
 
-# Set working directory
-WORKDIR /build
+# Create the final API environment from its YAML file
+COPY hummingbot-backend-api/environment.yml .
+RUN conda env create -f environment.yml
 
-# Copy only the environment file first (for better layer caching)
-COPY environment.yml .
+# Install BUILD dependencies into the created environment
+RUN conda run -n hummingbot-api pip install --no-cache-dir cython "numpy<2.0.0" wheel setuptools
 
-# Create the conda environment
-RUN conda env create -f environment.yml && \
-    conda clean -afy && \
-    rm -rf /root/.cache/pip/*
+# Copy Hummingbot source code (this works because the build context is the parent dir)
+COPY hummingbot ./hummingbot-source
 
-# Stage 2: Runtime stage
-FROM continuumio/miniconda3
+# Build the wheel INSIDE the Python 3.12 API environment
+WORKDIR /app/hummingbot-source
+RUN conda run -n hummingbot-api python setup.py bdist_wheel
 
-# Install only runtime dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    libusb-1.0-0 \
-    && rm -rf /var/lib/apt/lists/*
 
-# Copy the conda environment from builder
+# =================================================================
+# STAGE 2: Release - Creates the final API image
+# =================================================================
+FROM continuumio/miniconda3:latest AS release
+
+RUN apt-get update && apt-get install -y --no-install-recommends libusb-1.0-0 && rm -rf /var/lib/apt/lists/*
+
+# Copy the complete, pre-built conda environment from the builder
 COPY --from=builder /opt/conda/envs/hummingbot-api /opt/conda/envs/hummingbot-api
-
-# Set the working directory
 WORKDIR /hummingbot-api
 
-# Copy only necessary application files
-COPY main.py config.py deps.py ./
-COPY models ./models
-COPY routers ./routers
-COPY services ./services
-COPY utils ./utils
-COPY database ./database
-COPY bots/controllers ./bots/controllers
-COPY bots/scripts ./bots/scripts
+# Install the custom-built, compatible wheel
+COPY --from=builder /app/hummingbot-source/dist/hummingbot-*.whl .
+RUN /opt/conda/envs/hummingbot-api/bin/pip install --no-deps --no-cache-dir hummingbot-*.whl && rm hummingbot-*.whl
 
-# Create necessary directories
-RUN mkdir -p bots/instances bots/conf bots/credentials bots/data bots/archived
+# Copy API application source code
+COPY hummingbot-backend-api/. .
 
-# Expose port
 EXPOSE 8000
-
-# Set environment variables to ensure conda env is used
-ENV PATH="/opt/conda/envs/hummingbot-api/bin:$PATH"
-ENV CONDA_DEFAULT_ENV=hummingbot-api
-
-# Run the application
-ENTRYPOINT ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/opt/conda/envs/hummingbot-api/bin/uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
