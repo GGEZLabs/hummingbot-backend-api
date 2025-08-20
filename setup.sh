@@ -150,7 +150,7 @@ echo -e "${GREEN}🐳 Starting required Docker containers and pulling Hummingbot
 
 # Run docker operations in parallel
 docker compose up emqx postgres -d &
-docker pull hummingbot/hummingbot:latest &
+# docker pull hummingbot/hummingbot:latest &
 
 # Wait for both operations to complete
 wait
