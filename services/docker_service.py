@@ -1,12 +1,9 @@
 import logging
 import os
 import shutil
-import time
 import threading
+import time
 from typing import Dict
-
-# Create module-specific logger
-logger = logging.getLogger(__name__)
 
 import docker
 from docker.errors import DockerException
@@ -16,19 +13,22 @@ from config import settings
 from models import V2ScriptDeployment
 from utils.file_system import fs_util
 
+# Create module-specific logger
+logger = logging.getLogger(__name__)
+
 
 class DockerService:
     # Class-level configuration for cleanup
     PULL_STATUS_MAX_AGE_SECONDS = 3600  # Keep status for 1 hour
     PULL_STATUS_MAX_ENTRIES = 100  # Maximum number of entries to keep
     CLEANUP_INTERVAL_SECONDS = 300  # Run cleanup every 5 minutes
-    
+
     def __init__(self):
         self.SOURCE_PATH = os.getcwd()
         self._pull_status: Dict[str, Dict] = {}
         self._cleanup_thread = None
         self._stop_cleanup = threading.Event()
-        
+
         try:
             self.client = docker.from_env()
             # Start background cleanup thread
@@ -45,9 +45,10 @@ class DockerService:
                         "id": container.id,
                         "name": container.name,
                         "status": container.status,
-                        "image": container.image.tags[0] if container.image.tags else container.image.id[:12]
+                        "image": container.image.tags[0] if container.image.tags else container.image.id[:12],
                     }
-                    for container in all_containers if name_filter.lower() in container.name.lower()
+                    for container in all_containers
+                    if name_filter.lower() in container.name.lower()
                 ]
             else:
                 containers_info = [
@@ -55,7 +56,7 @@ class DockerService:
                         "id": container.id,
                         "name": container.name,
                         "status": container.status,
-                        "image": container.image.tags[0] if container.image.tags else container.image.id[:12]
+                        "image": container.image.tags[0] if container.image.tags else container.image.id[:12],
                     }
                     for container in all_containers
                 ]
@@ -93,9 +94,10 @@ class DockerService:
                         "id": container.id,
                         "name": container.name,
                         "status": container.status,
-                        "image": container.image.tags[0] if container.image.tags else container.image.id[:12]
+                        "image": container.image.tags[0] if container.image.tags else container.image.id[:12],
                     }
-                    for container in all_containers if name_filter.lower() in container.name.lower()
+                    for container in all_containers
+                    if name_filter.lower() in container.name.lower()
                 ]
             else:
                 containers_info = [
@@ -103,7 +105,7 @@ class DockerService:
                         "id": container.id,
                         "name": container.name,
                         "status": container.status,
-                        "image": container.image.tags[0] if container.image.tags else container.image.id[:12]
+                        "image": container.image.tags[0] if container.image.tags else container.image.id[:12],
                     }
                     for container in all_containers
                 ]
@@ -147,8 +149,8 @@ class DockerService:
                 "state": {
                     "status": container.status,
                     "running": container.status == "running",
-                    "exit_code": getattr(container.attrs.get("State", {}), "ExitCode", None)
-                }
+                    "exit_code": getattr(container.attrs.get("State", {}), "ExitCode", None),
+                },
             }
         except DockerException as e:
             return {"success": False, "message": str(e)}
@@ -162,62 +164,76 @@ class DockerService:
             return {"success": False, "message": str(e)}
 
     def create_hummingbot_instance(self, config: V2ScriptDeployment):
-        bots_path = os.environ.get('BOTS_PATH', self.SOURCE_PATH)  # Default to 'SOURCE_PATH' if BOTS_PATH is not set
+        bots_path = os.environ.get("BOTS_PATH", self.SOURCE_PATH)  # Default to 'SOURCE_PATH' if BOTS_PATH is not set
         instance_name = config.instance_name
-        instance_dir = os.path.join("bots", 'instances', instance_name)
+        instance_dir = os.path.join("bots", "instances", instance_name)
         if not os.path.exists(instance_dir):
             os.makedirs(instance_dir)
-            os.makedirs(os.path.join(instance_dir, 'data'))
-            os.makedirs(os.path.join(instance_dir, 'logs'))
+            os.makedirs(os.path.join(instance_dir, "data"))
+            os.makedirs(os.path.join(instance_dir, "logs"))
 
         # Copy credentials to instance directory
-        source_credentials_dir = os.path.join("bots", 'credentials', config.credentials_profile)
-        destination_credentials_dir = os.path.join(instance_dir, 'conf')
+        source_credentials_dir = os.path.join("bots", "credentials", config.credentials_profile)
+        destination_credentials_dir = os.path.join(instance_dir, "conf")
 
         # Remove the destination directory if it already exists
         if os.path.exists(destination_credentials_dir):
             shutil.rmtree(destination_credentials_dir)
 
-        # Copy the entire contents of source_credentials_dir to destination_credentials_dir     
-        shutil.copytree(source_credentials_dir, destination_credentials_dir)
-        
+        # Copy the entire contents of source_credentials_dir to destination_credentials_dir
+        # copy connectors , .password_verification , selected conf folder content
+        # the hummingbot conf folder structure should be as follows:
+        #   conf/
+        #       connectors/
+        #       .password_verification
+        #       conf_client.yml
+        #       conf_fee_overrides.yml
+        #       hummingbot_logs.yml
+        connectors_path = os.path.join(source_credentials_dir, "connectors")
+        selected_config_path = os.path.join(source_credentials_dir, f"configs/{config.account_config}")
+        shutil.copytree(selected_config_path, destination_credentials_dir)
+        shutil.copytree(connectors_path, destination_credentials_dir + "/connectors")
+        shutil.copyfile(
+            source_credentials_dir + "/.password_verification", destination_credentials_dir + "/.password_verification"
+        )
+
         # Copy specific script config and referenced controllers if provided
         if config.script_config:
-            script_config_dir = os.path.join("bots", 'conf', 'scripts')
-            controllers_config_dir = os.path.join("bots", 'conf', 'controllers')
-            destination_scripts_config_dir = os.path.join(instance_dir, 'conf', 'scripts')
-            destination_controllers_config_dir = os.path.join(instance_dir, 'conf', 'controllers')
-            
+            script_config_dir = os.path.join("bots", "conf", "scripts")
+            controllers_config_dir = os.path.join("bots", "conf", "controllers")
+            destination_scripts_config_dir = os.path.join(instance_dir, "conf", "scripts")
+            destination_controllers_config_dir = os.path.join(instance_dir, "conf", "controllers")
+
             os.makedirs(destination_scripts_config_dir, exist_ok=True)
-            
+
             # Copy the specific script config file
             source_script_config_file = os.path.join(script_config_dir, config.script_config)
             destination_script_config_file = os.path.join(destination_scripts_config_dir, config.script_config)
-            
+
             if os.path.exists(source_script_config_file):
                 shutil.copy2(source_script_config_file, destination_script_config_file)
-                
+
                 # Load the script config to find referenced controllers
                 try:
                     # Path relative to fs_util base_path (which is "bots")
                     script_config_relative_path = f"conf/scripts/{config.script_config}"
                     script_config_content = fs_util.read_yaml_file(script_config_relative_path)
-                    controllers_list = script_config_content.get('controllers_config', [])
-                    
+                    controllers_list = script_config_content.get("controllers_config", [])
+
                     # If there are controllers referenced, copy them
                     if controllers_list:
                         os.makedirs(destination_controllers_config_dir, exist_ok=True)
-                        
+
                         for controller_file in controllers_list:
                             source_controller_file = os.path.join(controllers_config_dir, controller_file)
                             destination_controller_file = os.path.join(destination_controllers_config_dir, controller_file)
-                            
+
                             if os.path.exists(source_controller_file):
                                 shutil.copy2(source_controller_file, destination_controller_file)
                                 logger.info(f"Copied controller config: {controller_file}")
                             else:
                                 logger.warning(f"Controller config file {controller_file} not found in {controllers_config_dir}")
-                                
+
                 except Exception as e:
                     logger.error(f"Error reading script config file {config.script_config}: {e}")
             else:
@@ -225,19 +241,30 @@ class DockerService:
         # Path relative to fs_util base_path (which is "bots")
         conf_file_path = f"instances/{instance_name}/conf/conf_client.yml"
         client_config = fs_util.read_yaml_file(conf_file_path)
-        client_config['instance_id'] = instance_name
+        client_config["instance_id"] = instance_name
         fs_util.dump_dict_to_yaml(conf_file_path, client_config)
-
         # Set up Docker volumes
         volumes = {
-            os.path.abspath(os.path.join(bots_path, instance_dir, 'conf')): {'bind': '/home/hummingbot/conf', 'mode': 'rw'},
-            os.path.abspath(os.path.join(bots_path, instance_dir, 'conf', 'connectors')): {'bind': '/home/hummingbot/conf/connectors', 'mode': 'rw'},
-            os.path.abspath(os.path.join(bots_path, instance_dir, 'conf', 'scripts')): {'bind': '/home/hummingbot/conf/scripts', 'mode': 'rw'},
-            os.path.abspath(os.path.join(bots_path, instance_dir, 'conf', 'controllers')): {'bind': '/home/hummingbot/conf/controllers', 'mode': 'rw'},
-            os.path.abspath(os.path.join(bots_path, instance_dir, 'data')): {'bind': '/home/hummingbot/data', 'mode': 'rw'},
-            os.path.abspath(os.path.join(bots_path, instance_dir, 'logs')): {'bind': '/home/hummingbot/logs', 'mode': 'rw'},
-            os.path.abspath(os.path.join(bots_path, "bots", 'scripts')): {'bind': '/home/hummingbot/scripts', 'mode': 'rw'},
-            os.path.abspath(os.path.join(bots_path, "bots", 'controllers')): {'bind': '/home/hummingbot/controllers', 'mode': 'rw'},
+            os.path.abspath(os.path.join(bots_path, instance_dir, "conf")): {"bind": "/home/hummingbot/conf", "mode": "rw"},
+            os.path.abspath(os.path.join(bots_path, instance_dir, "conf", "connectors")): {
+                "bind": "/home/hummingbot/conf/connectors",
+                "mode": "rw",
+            },
+            os.path.abspath(os.path.join(bots_path, instance_dir, "conf", "scripts")): {
+                "bind": "/home/hummingbot/conf/scripts",
+                "mode": "rw",
+            },
+            os.path.abspath(os.path.join(bots_path, instance_dir, "conf", "controllers")): {
+                "bind": "/home/hummingbot/conf/controllers",
+                "mode": "rw",
+            },
+            os.path.abspath(os.path.join(bots_path, instance_dir, "data")): {"bind": "/home/hummingbot/data", "mode": "rw"},
+            os.path.abspath(os.path.join(bots_path, instance_dir, "logs")): {"bind": "/home/hummingbot/logs", "mode": "rw"},
+            os.path.abspath(os.path.join(bots_path, "bots", "scripts")): {"bind": "/home/hummingbot/scripts", "mode": "rw"},
+            os.path.abspath(os.path.join(bots_path, "bots", "controllers")): {
+                "bind": "/home/hummingbot/controllers",
+                "mode": "rw",
+            },
         }
 
         # Set up environment variables
@@ -248,9 +275,9 @@ class DockerService:
 
         if config.script:
             if password:
-                environment['CONFIG_FILE_NAME'] = config.script
+                environment["CONFIG_FILE_NAME"] = config.script
                 if config.script_config:
-                    environment['SCRIPT_CONFIG'] = config.script_config
+                    environment["SCRIPT_CONFIG"] = config.script_config
             else:
                 return {"success": False, "message": "Password not provided. We cannot start the bot without a password."}
 
@@ -260,9 +287,10 @@ class DockerService:
         log_config = LogConfig(
             type="json-file",
             config={
-                'max-size': '10m',
-                'max-file': "5",
-            })
+                "max-size": "10m",
+                "max-file": "5",
+            },
+        )
         try:
             self.client.containers.run(
                 image=config.image,
@@ -293,7 +321,7 @@ class DockerService:
                 self._cleanup_old_pull_status()
             except Exception as e:
                 logger.error(f"Error in cleanup thread: {e}")
-            
+
             # Wait for the next cleanup interval
             self._stop_cleanup.wait(self.CLEANUP_INTERVAL_SECONDS)
 
@@ -301,34 +329,31 @@ class DockerService:
         """Remove old entries to prevent memory growth"""
         current_time = time.time()
         to_remove = []
-        
+
         # Find entries older than max age
         for image_name, status_info in self._pull_status.items():
             # Skip ongoing pulls
             if status_info["status"] == "pulling":
                 continue
-                
+
             # Check age of completed/failed operations
             end_time = status_info.get("completed_at") or status_info.get("failed_at")
             if end_time and (current_time - end_time > self.PULL_STATUS_MAX_AGE_SECONDS):
                 to_remove.append(image_name)
-        
+
         # Remove old entries
         for image_name in to_remove:
             del self._pull_status[image_name]
             logger.info(f"Cleaned up old pull status for {image_name}")
-        
+
         # If still over limit, remove oldest completed/failed entries
         if len(self._pull_status) > self.PULL_STATUS_MAX_ENTRIES:
             completed_entries = [
-                (name, info) for name, info in self._pull_status.items() 
-                if info["status"] in ["completed", "failed"]
+                (name, info) for name, info in self._pull_status.items() if info["status"] in ["completed", "failed"]
             ]
             # Sort by end time (oldest first)
-            completed_entries.sort(
-                key=lambda x: x[1].get("completed_at") or x[1].get("failed_at") or 0
-            )
-            
+            completed_entries.sort(key=lambda x: x[1].get("completed_at") or x[1].get("failed_at") or 0)
+
             # Remove oldest entries to get under limit
             excess_count = len(self._pull_status) - self.PULL_STATUS_MAX_ENTRIES
             for i in range(min(excess_count, len(completed_entries))):
@@ -345,50 +370,42 @@ class DockerService:
                     "message": f"Pull already in progress for {image_name}",
                     "status": "in_progress",
                     "started_at": current_status["started_at"],
-                    "image_name": image_name
+                    "image_name": image_name,
                 }
-        
+
         # Start the pull in a background thread
         threading.Thread(target=self._pull_image_with_tracking, args=(image_name,), daemon=True).start()
-        
-        return {
-            "message": f"Pull started for {image_name}",
-            "status": "started",
-            "image_name": image_name
-        }
+
+        return {"message": f"Pull started for {image_name}", "status": "started", "image_name": image_name}
 
     def _pull_image_with_tracking(self, image_name: str):
         """Background task to pull Docker image with status tracking"""
         try:
-            self._pull_status[image_name] = {
-                "status": "pulling", 
-                "started_at": time.time(),
-                "progress": "Starting pull..."
-            }
-            
+            self._pull_status[image_name] = {"status": "pulling", "started_at": time.time(), "progress": "Starting pull..."}
+
             # Use the synchronous pull method
             result = self.pull_image_sync(image_name)
-            
+
             if result.get("success"):
                 self._pull_status[image_name] = {
-                    "status": "completed", 
+                    "status": "completed",
                     "started_at": self._pull_status[image_name]["started_at"],
                     "completed_at": time.time(),
-                    "result": result
+                    "result": result,
                 }
             else:
                 self._pull_status[image_name] = {
-                    "status": "failed", 
+                    "status": "failed",
                     "started_at": self._pull_status[image_name]["started_at"],
                     "failed_at": time.time(),
-                    "error": result.get("error", "Unknown error")
+                    "error": result.get("error", "Unknown error"),
                 }
         except Exception as e:
             self._pull_status[image_name] = {
-                "status": "failed", 
+                "status": "failed",
                 "started_at": self._pull_status[image_name].get("started_at", time.time()),
                 "failed_at": time.time(),
-                "error": str(e)
+                "error": str(e),
             }
 
     def get_all_pull_status(self):
@@ -396,7 +413,7 @@ class DockerService:
         operations = {}
         for image_name, status_info in self._pull_status.items():
             status_copy = status_info.copy()
-            
+
             # Add duration for each operation
             start_time = status_copy.get("started_at")
             if start_time:
@@ -406,13 +423,10 @@ class DockerService:
                     status_copy["duration_seconds"] = round(status_copy["completed_at"] - start_time, 2)
                 elif "failed_at" in status_copy:
                     status_copy["duration_seconds"] = round(status_copy["failed_at"] - start_time, 2)
-            
+
             operations[image_name] = status_copy
-        
-        return {
-            "pull_operations": operations,
-            "total_operations": len(operations)
-        }
+
+        return {"pull_operations": operations, "total_operations": len(operations)}
 
     def cleanup(self):
         """Clean up resources when shutting down"""

@@ -1,31 +1,31 @@
+import asyncio
 import logging
 import os
-import asyncio
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 
-# Create module-specific logger
-logger = logging.getLogger(__name__)
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
-from models import StartBotAction, StopBotAction, V2ScriptDeployment, V2ControllerDeployment
+from database import AsyncDatabaseManager, BotRunRepository
+from deps import get_bot_archiver, get_bots_orchestrator, get_database_manager, get_docker_service
+from models import StartBotAction, StopBotAction, V2ControllerDeployment, V2ScriptDeployment
 from services.bots_orchestrator import BotsOrchestrator
 from services.docker_service import DockerService
-from deps import get_bots_orchestrator, get_docker_service, get_bot_archiver, get_database_manager
-from utils.file_system import fs_util
 from utils.bot_archiver import BotArchiver
-from database import AsyncDatabaseManager, BotRunRepository
+from utils.file_system import fs_util
 
 router = APIRouter(tags=["Bot Orchestration"], prefix="/bot-orchestration")
+# Create module-specific logger
+logger = logging.getLogger(__name__)
 
 
 @router.get("/status")
 def get_active_bots_status(bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator)):
     """
     Get the status of all active bots.
-    
+
     Args:
         bots_manager: Bot orchestrator service dependency
-        
+
     Returns:
         Dictionary with status and data containing all active bot statuses
     """
@@ -36,20 +36,20 @@ def get_active_bots_status(bots_manager: BotsOrchestrator = Depends(get_bots_orc
 def get_mqtt_status(bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator)):
     """
     Get MQTT connection status and discovered bots.
-    
+
     Args:
         bots_manager: Bot orchestrator service dependency
-        
+
     Returns:
         Dictionary with MQTT connection status, discovered bots, and broker information
     """
     mqtt_connected = bots_manager.mqtt_manager.is_connected
     discovered_bots = bots_manager.mqtt_manager.get_discovered_bots()
     active_bots = list(bots_manager.active_bots.keys())
-    
+
     # Check client state
     client_state = "connected" if bots_manager.mqtt_manager.is_connected else "disconnected"
-    
+
     return {
         "status": "success",
         "data": {
@@ -59,8 +59,8 @@ def get_mqtt_status(bots_manager: BotsOrchestrator = Depends(get_bots_orchestrat
             "broker_host": bots_manager.broker_host,
             "broker_port": bots_manager.broker_port,
             "broker_username": bots_manager.broker_username,
-            "client_state": client_state
-        }
+            "client_state": client_state,
+        },
     }
 
 
@@ -68,38 +68,35 @@ def get_mqtt_status(bots_manager: BotsOrchestrator = Depends(get_bots_orchestrat
 def get_bot_status(bot_name: str, bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator)):
     """
     Get the status of a specific bot.
-    
+
     Args:
         bot_name: Name of the bot to get status for
         bots_manager: Bot orchestrator service dependency
-        
+
     Returns:
         Dictionary with bot status information
-        
+
     Raises:
         HTTPException: 404 if bot not found
     """
     response = bots_manager.get_bot_status(bot_name)
     if not response:
         raise HTTPException(status_code=404, detail="Bot not found")
-    return {
-        "status": "success",
-        "data": response
-    }
+    return {"status": "success", "data": response}
 
 
 @router.get("/{bot_name}/history")
 async def get_bot_history(
-    bot_name: str, 
-    days: int = 0, 
-    verbose: bool = False, 
-    precision: int = None, 
+    bot_name: str,
+    days: int = 0,
+    verbose: bool = False,
+    precision: int = None,
     timeout: float = 30.0,
-    bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator)
+    bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator),
 ):
     """
     Get trading history for a bot with optional parameters.
-    
+
     Args:
         bot_name: Name of the bot to get history for
         days: Number of days of history to retrieve (0 for all)
@@ -107,82 +104,75 @@ async def get_bot_history(
         precision: Decimal precision for numerical values
         timeout: Timeout in seconds for the operation
         bots_manager: Bot orchestrator service dependency
-        
+
     Returns:
         Dictionary with bot trading history
     """
-    response = await bots_manager.get_bot_history(
-        bot_name, 
-        days=days, 
-        verbose=verbose, 
-        precision=precision, 
-        timeout=timeout
-    )
+    response = await bots_manager.get_bot_history(bot_name, days=days, verbose=verbose, precision=precision, timeout=timeout)
     return {"status": "success", "response": response}
 
 
 @router.post("/start-bot")
 async def start_bot(
-    action: StartBotAction, 
+    action: StartBotAction,
     bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator),
-    db_manager: AsyncDatabaseManager = Depends(get_database_manager)
+    db_manager: AsyncDatabaseManager = Depends(get_database_manager),
 ):
     """
     Start a bot with the specified configuration.
-    
+
     Args:
         action: StartBotAction containing bot configuration parameters
         bots_manager: Bot orchestrator service dependency
         db_manager: Database manager dependency
-        
+
     Returns:
         Dictionary with status and response from bot start operation
     """
-    response = await bots_manager.start_bot(action.bot_name, log_level=action.log_level, script=action.script,
-                                      conf=action.conf, async_backend=action.async_backend)
-    
+    response = await bots_manager.start_bot(
+        action.bot_name, log_level=action.log_level, script=action.script, conf=action.conf, async_backend=action.async_backend
+    )
+
     # Bot run tracking simplified - only track deployment and stop times
-    
+
     return {"status": "success", "response": response}
 
 
 @router.post("/stop-bot")
 async def stop_bot(
-    action: StopBotAction, 
+    action: StopBotAction,
     bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator),
-    db_manager: AsyncDatabaseManager = Depends(get_database_manager)
+    db_manager: AsyncDatabaseManager = Depends(get_database_manager),
 ):
     """
     Stop a bot with the specified configuration.
-    
+
     Args:
         action: StopBotAction containing bot stop parameters
         bots_manager: Bot orchestrator service dependency
         db_manager: Database manager dependency
-        
+
     Returns:
         Dictionary with status and response from bot stop operation
     """
-    response = await bots_manager.stop_bot(action.bot_name, skip_order_cancellation=action.skip_order_cancellation,
-                                     async_backend=action.async_backend)
-    
+    response = await bots_manager.stop_bot(
+        action.bot_name, skip_order_cancellation=action.skip_order_cancellation, async_backend=action.async_backend
+    )
+
     # Update bot run status to STOPPED if stop was successful
     if response.get("success"):
         try:
             # Try to get bot status for final status data
             final_status = bots_manager.get_bot_status(action.bot_name)
-            
+
             async with db_manager.get_session_context() as session:
                 bot_run_repo = BotRunRepository(session)
-                await bot_run_repo.update_bot_run_stopped(
-                    action.bot_name,
-                    final_status=final_status
-                )
+                await bot_run_repo.update_bot_run_stopped(action.bot_name, final_status=final_status)
                 logger.info(f"Updated bot run status to STOPPED for {action.bot_name}")
         except Exception as e:
             logger.error(f"Failed to update bot run status: {e}")
             # Don't fail the stop operation if bot run update fails
-    
+
     return {"status": "success", "response": response}
 
 
@@ -196,11 +186,11 @@ async def get_bot_runs(
     deployment_status: str = None,
     limit: int = 100,
     offset: int = 0,
-    db_manager: AsyncDatabaseManager = Depends(get_database_manager)
+    db_manager: AsyncDatabaseManager = Depends(get_database_manager),
 ):
     """
     Get bot runs with optional filtering.
-    
+
     Args:
         bot_name: Filter by bot name
         account_name: Filter by account name
@@ -211,7 +201,7 @@ async def get_bot_runs(
         limit: Maximum number of results to return
         offset: Number of results to skip
         db_manager: Database manager dependency
-        
+
     Returns:
         List of bot runs with their details
     """
@@ -226,9 +216,9 @@ async def get_bot_runs(
                 run_status=run_status,
                 deployment_status=deployment_status,
                 limit=limit,
-                offset=offset
+                offset=offset,
             )
-            
+
             # Convert bot runs to dictionaries for JSON serialization
             runs_data = []
             for run in bot_runs:
@@ -247,37 +237,28 @@ async def get_bot_runs(
                     "run_status": run.run_status,
                     "deployment_config": run.deployment_config,
                     "final_status": run.final_status,
-                    "error_message": run.error_message
+                    "error_message": run.error_message,
                 }
                 runs_data.append(run_dict)
-            
-            return {
-                "status": "success", 
-                "data": runs_data,
-                "total": len(runs_data),
-                "limit": limit,
-                "offset": offset
-            }
+
+            return {"status": "success", "data": runs_data, "total": len(runs_data), "limit": limit, "offset": offset}
     except Exception as e:
         logger.error(f"Failed to get bot runs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/bot-runs/{bot_run_id}")
-async def get_bot_run_by_id(
-    bot_run_id: int,
-    db_manager: AsyncDatabaseManager = Depends(get_database_manager)
-):
+async def get_bot_run_by_id(bot_run_id: int, db_manager: AsyncDatabaseManager = Depends(get_database_manager)):
     """
     Get a specific bot run by ID.
-    
+
     Args:
         bot_run_id: ID of the bot run
         db_manager: Database manager dependency
-        
+
     Returns:
         Bot run details
-        
+
     Raises:
         HTTPException: 404 if bot run not found
     """
@@ -285,10 +266,10 @@ async def get_bot_run_by_id(
         async with db_manager.get_session_context() as session:
             bot_run_repo = BotRunRepository(session)
             bot_run = await bot_run_repo.get_bot_run_by_id(bot_run_id)
-            
+
             if not bot_run:
                 raise HTTPException(status_code=404, detail=f"Bot run {bot_run_id} not found")
-            
+
             run_dict = {
                 "id": bot_run.id,
                 "bot_name": bot_run.bot_name,
@@ -304,9 +285,9 @@ async def get_bot_run_by_id(
                 "run_status": bot_run.run_status,
                 "deployment_config": bot_run.deployment_config,
                 "final_status": bot_run.final_status,
-                "error_message": bot_run.error_message
+                "error_message": bot_run.error_message,
             }
-            
+
             return {"status": "success", "data": run_dict}
     except HTTPException:
         raise
@@ -316,15 +297,13 @@ async def get_bot_run_by_id(
 
 
 @router.get("/bot-runs/stats")
-async def get_bot_run_stats(
-    db_manager: AsyncDatabaseManager = Depends(get_database_manager)
-):
+async def get_bot_run_stats(db_manager: AsyncDatabaseManager = Depends(get_database_manager)):
     """
     Get statistics about bot runs.
-    
+
     Args:
         db_manager: Database manager dependency
-        
+
     Returns:
         Bot run statistics
     """
@@ -332,7 +311,7 @@ async def get_bot_run_stats(
         async with db_manager.get_session_context() as session:
             bot_run_repo = BotRunRepository(session)
             stats = await bot_run_repo.get_bot_run_stats()
-            
+
             return {"status": "success", "data": stats}
     except Exception as e:
         logger.error(f"Failed to get bot run stats: {e}")
@@ -349,12 +328,12 @@ async def _background_stop_and_archive(
     bots_manager: BotsOrchestrator,
     docker_manager: DockerService,
     bot_archiver: BotArchiver,
-    db_manager: AsyncDatabaseManager
+    db_manager: AsyncDatabaseManager,
 ):
     """Background task to handle the stop and archive process"""
     try:
         logger.info(f"Starting background stop-and-archive for {bot_name}")
-        
+
         # Step 1: Capture bot final status before stopping (while bot is still running)
         logger.info(f"Capturing final status for {bot_name_for_orchestrator}")
         final_status = None
@@ -363,64 +342,61 @@ async def _background_stop_and_archive(
             logger.info(f"Captured final status for {bot_name_for_orchestrator}: {final_status}")
         except Exception as e:
             logger.warning(f"Failed to capture final status for {bot_name_for_orchestrator}: {e}")
-        
+
         # Step 2: Update bot run with stopped_at timestamp and final status before stopping
         try:
             async with db_manager.get_session_context() as session:
                 bot_run_repo = BotRunRepository(session)
-                await bot_run_repo.update_bot_run_stopped(
-                    bot_name,
-                    final_status=final_status
-                )
+                await bot_run_repo.update_bot_run_stopped(bot_name, final_status=final_status)
                 logger.info(f"Updated bot run with stopped_at timestamp and final status for {bot_name}")
         except Exception as e:
             logger.error(f"Failed to update bot run with stopped status: {e}")
             # Continue with stop process even if database update fails
-        
+
         # Step 3: Mark the bot as stopping, and stop the bot trading process
         bots_manager.set_bot_stopping(bot_name_for_orchestrator)
         logger.info(f"Stopping bot trading process for {bot_name_for_orchestrator}")
         stop_response = await bots_manager.stop_bot(
-            bot_name_for_orchestrator, 
+            bot_name_for_orchestrator,
             skip_order_cancellation=skip_order_cancellation,
-            async_backend=True  # Always use async for background tasks
+            async_backend=True,  # Always use async for background tasks
         )
-        
+
         if not stop_response or not stop_response.get("success", False):
-            error_msg = stop_response.get('error', 'Unknown error') if stop_response else 'No response from bot orchestrator'
+            error_msg = stop_response.get("error", "Unknown error") if stop_response else "No response from bot orchestrator"
             logger.error(f"Failed to stop bot process: {error_msg}")
             return
-        
+
         # Step 4: Wait for graceful shutdown (15 seconds as requested)
         logger.info(f"Waiting 15 seconds for bot {bot_name} to gracefully shutdown")
         await asyncio.sleep(15)
-        
+
         # Step 5: Stop the container with monitoring
         max_retries = 10
         retry_interval = 2
         container_stopped = False
-        
+
         for i in range(max_retries):
             logger.info(f"Attempting to stop container {container_name} (attempt {i+1}/{max_retries})")
             docker_manager.stop_container(container_name)
-                
+
             # Check if container is already stopped
             container_status = docker_manager.get_container_status(container_name)
             if container_status.get("state", {}).get("status") == "exited":
                 container_stopped = True
                 logger.info(f"Container {container_name} is already stopped")
                 break
-                
+
             await asyncio.sleep(retry_interval)
-        
+
         if not container_stopped:
             logger.error(f"Failed to stop container {container_name} after {max_retries} attempts")
             return
-        
+
         # Step 6: Archive the bot data
-        instance_dir = os.path.join('bots', 'instances', container_name)
+        instance_dir = os.path.join("bots", "instances", container_name)
         logger.info(f"Archiving bot data from {instance_dir}")
-        
+
         try:
             if archive_locally:
                 bot_archiver.archive_locally(container_name, instance_dir)
@@ -430,19 +406,19 @@ async def _background_stop_and_archive(
         except Exception as e:
             logger.error(f"Archive failed: {str(e)}")
             # Continue with removal even if archive fails
-            
+
         # Step 7: Remove the container
         logging.info(f"Removing container {container_name}")
         remove_response = docker_manager.remove_container(container_name, force=False)
-        
+
         if not remove_response.get("success"):
             # If graceful remove fails, try force remove
             logging.warning("Graceful container removal failed, attempting force removal")
             remove_response = docker_manager.remove_container(container_name, force=True)
-        
+
         if remove_response.get("success"):
             logging.info(f"Successfully completed stop-and-archive for bot {bot_name}")
-            
+
             # Step 8: Update bot run deployment status to ARCHIVED
             try:
                 async with db_manager.get_session_context() as session:
@@ -453,30 +429,26 @@ async def _background_stop_and_archive(
                 logger.error(f"Failed to update bot run to archived: {e}")
         else:
             logging.error(f"Failed to remove container {container_name}")
-            
+
             # Update bot run with error status (but keep stopped_at timestamp from earlier)
             try:
                 async with db_manager.get_session_context() as session:
                     bot_run_repo = BotRunRepository(session)
                     await bot_run_repo.update_bot_run_stopped(
-                        bot_name,
-                        error_message="Failed to remove container during archive process"
+                        bot_name, error_message="Failed to remove container during archive process"
                     )
                     logger.info(f"Updated bot run with error status for {bot_name}")
             except Exception as e:
                 logger.error(f"Failed to update bot run with error: {e}")
-            
+
     except Exception as e:
         logging.error(f"Error in background stop-and-archive for {bot_name}: {str(e)}")
-        
+
         # Update bot run with error status
         try:
             async with db_manager.get_session_context() as session:
                 bot_run_repo = BotRunRepository(session)
-                await bot_run_repo.update_bot_run_stopped(
-                    bot_name,
-                    error_message=str(e)
-                )
+                await bot_run_repo.update_bot_run_stopped(bot_name, error_message=str(e))
                 logger.info(f"Updated bot run with error status for {bot_name}")
         except Exception as db_error:
             logger.error(f"Failed to update bot run with error: {db_error}")
@@ -484,7 +456,7 @@ async def _background_stop_and_archive(
         # Always clear the stopping status when the background task completes
         bots_manager.clear_bot_stopping(bot_name_for_orchestrator)
         logger.info(f"Cleared stopping status for bot {bot_name}")
-        
+
         # Remove bot from active_bots and clear all MQTT data
         if bot_name_for_orchestrator in bots_manager.active_bots:
             bots_manager.mqtt_manager.clear_bot_data(bot_name_for_orchestrator)
@@ -502,7 +474,7 @@ async def stop_and_archive_bot(
     bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator),
     docker_manager: DockerService = Depends(get_docker_service),
     bot_archiver: BotArchiver = Depends(get_bot_archiver),
-    db_manager: AsyncDatabaseManager = Depends(get_database_manager)
+    db_manager: AsyncDatabaseManager = Depends(get_database_manager),
 ):
     """
     Gracefully stop a bot and archive its data in the background.
@@ -512,7 +484,7 @@ async def stop_and_archive_bot(
     3. Monitor and stop the Docker container
     4. Archive the bot data (locally or to S3)
     5. Remove the container
-    
+
     Returns immediately with a success message while the process continues in the background.
     """
     try:
@@ -520,28 +492,31 @@ async def stop_and_archive_bot(
         # Container name is now the same as bot name (no prefix added)
         actual_bot_name = bot_name
         container_name = bot_name
-        
+
         logging.info(f"Normalized bot_name: {actual_bot_name}, container_name: {container_name}")
-        
+
         # Step 2: Validate bot exists in active bots
         active_bots = list(bots_manager.active_bots.keys())
-        
+
         # Check if bot exists in active bots (could be stored as either format)
         bot_found = (actual_bot_name in active_bots) or (container_name in active_bots)
-        
+
         if not bot_found:
             return {
                 "status": "error",
-                "message": f"Bot '{actual_bot_name}' not found in active bots. Active bots: {active_bots}. Cannot perform graceful shutdown.",
+                "message": f"""
+                    Bot '{actual_bot_name}' not found in active bots. Active bots:
+                     {active_bots}. Cannot perform graceful shutdown.
+                """,
                 "details": {
                     "input_name": bot_name,
                     "actual_bot_name": actual_bot_name,
                     "container_name": container_name,
                     "active_bots": active_bots,
-                    "reason": "Bot must be actively managed via MQTT for graceful shutdown"
-                }
+                    "reason": "Bot must be actively managed via MQTT for graceful shutdown",
+                },
             }
-        
+
         # Use the format that's actually stored in active bots
         bot_name_for_orchestrator = container_name if container_name in active_bots else actual_bot_name
 
@@ -557,9 +532,9 @@ async def stop_and_archive_bot(
             bots_manager=bots_manager,
             docker_manager=docker_manager,
             bot_archiver=bot_archiver,
-            db_manager=db_manager
+            db_manager=db_manager,
         )
-        
+
         return {
             "status": "success",
             "message": f"Stop and archive process started for bot {actual_bot_name}",
@@ -567,10 +542,13 @@ async def stop_and_archive_bot(
                 "input_name": bot_name,
                 "actual_bot_name": actual_bot_name,
                 "container_name": container_name,
-                "process": "The bot will be gracefully stopped, archived, and removed in the background. This process typically takes 20-30 seconds."
-            }
+                "process": """
+                The bot will be gracefully stopped, archived,
+                 and removed in the background. This process typically takes 20-30 seconds.
+                 """,
+            },
         }
-        
+
     except Exception as e:
         logging.error(f"Error initiating stop_and_archive_bot for {bot_name}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -578,24 +556,24 @@ async def stop_and_archive_bot(
 
 @router.post("/deploy-v2-script")
 async def deploy_v2_script(
-    config: V2ScriptDeployment, 
+    config: V2ScriptDeployment,
     docker_manager: DockerService = Depends(get_docker_service),
-    db_manager: AsyncDatabaseManager = Depends(get_database_manager)
+    db_manager: AsyncDatabaseManager = Depends(get_database_manager),
 ):
     """
     Creates and autostart a v2 script with a configuration if present.
-    
+
     Args:
         config: Configuration for the new Hummingbot instance
         docker_manager: Docker service dependency
         db_manager: Database manager dependency
-        
+
     Returns:
         Dictionary with creation response and instance details
     """
     logging.info(f"Creating hummingbot instance with config: {config}")
     response = docker_manager.create_hummingbot_instance(config)
-    
+
     # Track bot run if deployment was successful
     if response.get("success"):
         try:
@@ -609,13 +587,13 @@ async def deploy_v2_script(
                     account_name=config.credentials_profile,
                     config_name=config.script_config,
                     image_version=config.image,
-                    deployment_config=config.dict()
+                    deployment_config=config.dict(),
                 )
                 logger.info(f"Created bot run record for {config.instance_name}")
         except Exception as e:
             logger.error(f"Failed to create bot run record: {e}")
             # Don't fail the deployment if bot run creation fails
-    
+
     return response
 
 
@@ -623,19 +601,19 @@ async def deploy_v2_script(
 async def deploy_v2_controllers(
     deployment: V2ControllerDeployment,
     docker_manager: DockerService = Depends(get_docker_service),
-    db_manager: AsyncDatabaseManager = Depends(get_database_manager)
+    db_manager: AsyncDatabaseManager = Depends(get_database_manager),
 ):
     """
     Deploy a V2 strategy with controllers by generating the script config and creating the instance.
     This endpoint simplifies the deployment process for V2 controller strategies.
-    
+
     Args:
         deployment: V2ControllerDeployment configuration
         docker_manager: Docker service dependency
-        
+
     Returns:
         Dictionary with deployment response and generated configuration details
-        
+
     Raises:
         HTTPException: 500 if deployment fails
     """
@@ -643,15 +621,15 @@ async def deploy_v2_controllers(
         # Generate unique script config filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         script_config_filename = f"{deployment.instance_name}-{timestamp}.yml"
-        
+
         # Ensure controller config names have .yml extension
         controllers_with_extension = []
         for controller in deployment.controllers_config:
-            if not controller.endswith('.yml'):
+            if not controller.endswith(".yml"):
                 controllers_with_extension.append(f"{controller}.yml")
             else:
                 controllers_with_extension.append(controller)
-        
+
         # Create the script config content
         script_config_content = {
             "script_file_name": "v2_with_controllers.py",
@@ -659,37 +637,38 @@ async def deploy_v2_controllers(
             "markets": {},
             "controllers_config": controllers_with_extension,
         }
-        
+
         # Add optional drawdown parameters if provided
         if deployment.max_global_drawdown_quote is not None:
             script_config_content["max_global_drawdown_quote"] = deployment.max_global_drawdown_quote
         if deployment.max_controller_drawdown_quote is not None:
             script_config_content["max_controller_drawdown_quote"] = deployment.max_controller_drawdown_quote
-        
+
         # Save the script config to the scripts directory
         scripts_dir = os.path.join("conf", "scripts")
 
         script_config_path = os.path.join(scripts_dir, script_config_filename)
         fs_util.dump_dict_to_yaml(script_config_path, script_config_content)
-        
+
         logging.info(f"Generated script config: {script_config_filename} with content: {script_config_content}")
-        
+
         # Create the V2ScriptDeployment with the generated script config
         instance_config = V2ScriptDeployment(
             instance_name=deployment.instance_name,
             credentials_profile=deployment.credentials_profile,
+            account_config=deployment.account_config,
             image=deployment.image,
             script="v2_with_controllers.py",
-            script_config=script_config_filename
+            script_config=script_config_filename,
         )
-        
+
         # Deploy the instance using the existing method
         response = docker_manager.create_hummingbot_instance(instance_config)
-        
+
         if response.get("success"):
             response["script_config_generated"] = script_config_filename
             response["controllers_deployed"] = deployment.controllers_config
-            
+
             # Track bot run if deployment was successful
             try:
                 async with db_manager.get_session_context() as session:
@@ -702,15 +681,15 @@ async def deploy_v2_controllers(
                         account_name=deployment.credentials_profile,
                         config_name=script_config_filename,
                         image_version=deployment.image,
-                        deployment_config=deployment.dict()
+                        deployment_config=deployment.dict(),
                     )
                     logger.info(f"Created bot run record for controller deployment {deployment.instance_name}")
             except Exception as e:
                 logger.error(f"Failed to create bot run record: {e}")
                 # Don't fail the deployment if bot run creation fails
-            
+
         return response
-        
+
     except Exception as e:
         logging.error(f"Error deploying V2 controllers: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

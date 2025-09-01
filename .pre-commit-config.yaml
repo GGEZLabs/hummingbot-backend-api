@@ -1,11 +1,11 @@
 repos:
 -   repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v2.3.0
+    rev: v6.0.0
     hooks:
     - id: detect-private-key
 
 -   repo: https://github.com/pre-commit/mirrors-eslint
-    rev: v8.10.0
+    rev: v9.34.0
     hooks:
     -   id: eslint
         files: \.[jt]sx?$  # *.js, *.jsx, *.ts and *.tsx
@@ -19,14 +19,14 @@ repos:
         exclude: .json
 
 -   repo: https://github.com/pycqa/isort
-    rev: 5.12.0
+    rev: 6.0.1
     hooks:
       - id: isort
         files: "\\.(py)$"
         args: [--settings-path=pyproject.toml]
 
 -   repo: https://github.com/pycqa/flake8
-    rev: 3.9.2
+    rev: 7.3.0
     hooks:
       - id: flake8
         additional_dependencies: ['flake8']
