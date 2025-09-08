@@ -60,7 +60,7 @@ class AccountsService:
         self._update_account_state_task: Optional[asyncio.Task] = None
 
         # Database setup for account states and orders
-        self.db_manager = AsyncDatabaseManager(settings.database.url)
+        self.db_manager = AsyncDatabaseManager(settings.database.url, settings.database.schema)
         self._db_initialized = False
 
         # Initialize connector manager with db_manager

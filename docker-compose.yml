@@ -14,12 +14,11 @@ services:
     environment:
       # Override specific values for Docker networking
       - BROKER_HOST=emqx
-      - DATABASE_URL=postgresql+asyncpg://hbot:hummingbot-api@postgres:5432/hummingbot_api
+      - DATABASE_URL=postgresql+asyncpg://hbot:hummingbot-api@localhost:5432/hummingbot_api
+      # - DATABASE_SCHEMA=public
     networks:
       - emqx-bridge
       - shared-network
-    depends_on:
-      - postgres
   emqx:
     container_name: hummingbot-broker
     image: emqx:5
@@ -50,25 +49,6 @@ services:
       test: ["CMD", "/opt/emqx/bin/emqx_ctl", "status"]
       interval: 5s
       timeout: 25s
-      retries: 5
-  postgres:
-    container_name: hummingbot-postgres
-    image: postgres:15
-    restart: unless-stopped
-    environment:
-      - POSTGRES_DB=hummingbot_api
-      - POSTGRES_USER=hbot
-      - POSTGRES_PASSWORD=hummingbot-api
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    networks:
-      - emqx-bridge
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hbot -d hummingbot_api"]
-      interval: 10s
-      timeout: 5s
       retries: 5
 
 networks:
