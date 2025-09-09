@@ -1,43 +1,65 @@
 # =================================================================
-# STAGE 1: Builder - Builds a compatible .whl file
+# STAGE 1: Builder - Builds a compatible .whl file using a full build environment
 # =================================================================
-FROM continuumio/miniconda3:latest AS builder
+# Use mambaforge for a faster, more stable build process
+FROM condaforge/mambaforge:latest AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
+# Install build-essential for C extensions
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Create the final API environment from its YAML file
+# Create the full build environment using Mamba for speed
 COPY hummingbot-backend-api/environment.yml .
-RUN conda env create -f environment.yml
+RUN mamba env create -f environment.yml && \
+    mamba clean --all --yes
 
-# Install BUILD dependencies into the created environment
-RUN conda run -n hummingbot-api pip install --no-cache-dir cython "numpy<2.0.0" wheel setuptools
-
-# Copy Hummingbot source code (this works because the build context is the parent dir)
+# Copy Hummingbot source code
 COPY hummingbot ./hummingbot-source
 
 # Build the wheel INSIDE the Python 3.12 API environment
 WORKDIR /app/hummingbot-source
-RUN conda run -n hummingbot-api python setup.py bdist_wheel
+RUN mamba run -n hummingbot-api python setup.py bdist_wheel
 
 
 # =================================================================
-# STAGE 2: Release - Creates the final API image
+# STAGE 2: Release - Creates the final, lean API image
 # =================================================================
-FROM continuumio/miniconda3:latest AS release
+# Start from a fresh mambaforge base to ensure a clean final image
+FROM condaforge/mambaforge:latest AS release
 
-RUN apt-get update && apt-get install -y --no-install-recommends libusb-1.0-0 && rm -rf /var/lib/apt/lists/*
+# Install runtime OS libraries
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libusb-1.0-0 && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy the complete, pre-built conda environment from the builder
-COPY --from=builder /opt/conda/envs/hummingbot-api /opt/conda/envs/hummingbot-api
+# 1. Create a NEW, lean runtime environment from our runtime-specific YAML
+WORKDIR /app
+COPY hummingbot-backend-api/runtime-environment.yml .
+RUN mamba env create -f runtime-environment.yml && \
+    mamba clean --all --yes
+
 WORKDIR /hummingbot-api
 
-# Install the custom-built, compatible wheel
+# 2. Install the custom-built wheel from the builder stage
 COPY --from=builder /app/hummingbot-source/dist/hummingbot-*.whl .
-RUN /opt/conda/envs/hummingbot-api/bin/pip install --no-deps --no-cache-dir hummingbot-*.whl && rm hummingbot-*.whl
+RUN /opt/conda/envs/hummingbot-api/bin/pip install --no-deps --no-cache-dir hummingbot-*.whl && \
+    rm hummingbot-*.whl
 
-# Copy API application source code
+# 3. Copy API application source code
 COPY hummingbot-backend-api/. .
 
+# 4. Aggressively clean the final environment to reduce size
+RUN find /opt/conda/envs/hummingbot-api -type d -name '__pycache__' -exec rm -r '{}' + && \
+    find /opt/conda/envs/hummingbot-api -type f -name '*.pyc' -delete && \
+    find /opt/conda/envs/hummingbot-api -type f -name '*.a' -delete
+
+# Set the PATH to simplify commands
+ENV PATH /opt/conda/envs/hummingbot-api/bin:$PATH
+
 EXPOSE 8000
-ENTRYPOINT ["/opt/conda/envs/hummingbot-api/bin/uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# Use simplified entrypoint
+ENTRYPOINT ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
