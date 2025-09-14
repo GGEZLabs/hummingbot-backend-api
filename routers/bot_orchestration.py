@@ -660,6 +660,7 @@ async def deploy_v2_controllers(
             image=deployment.image,
             script="v2_with_controllers.py",
             script_config=script_config_filename,
+            headless=deployment.headless,
         )
 
         # Deploy the instance using the existing method
