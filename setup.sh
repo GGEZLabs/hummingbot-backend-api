@@ -81,6 +81,7 @@ BROKER_PASSWORD=$BROKER_PASSWORD
 # 💾 Database Configuration (DATABASE_*)
 # =================================================================
 DATABASE_URL=$DATABASE_URL
+DATABASE_USED_SCHEMA="public"
 
 # =================================================================
 # 📊 Market Data Feed Manager Configuration (MARKET_DATA_*)

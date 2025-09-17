@@ -21,7 +21,7 @@ class DatabaseSettings(BaseSettings):
     url: str = Field(
         default="postgresql+asyncpg://hbot:hummingbot-api@localhost:5432/hummingbot_api", description="Database connection URL"
     )
-    schema: str | None = Field(default=None, description="Database schema (nullable)")
+    used_schema: str | None = Field(default=None, description="Database schema (nullable)")
 
     model_config = SettingsConfigDict(env_prefix="DATABASE_", extra="ignore")
 
