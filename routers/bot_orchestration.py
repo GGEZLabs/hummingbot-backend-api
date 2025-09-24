@@ -571,6 +571,12 @@ async def deploy_v2_script(
     Returns:
         Dictionary with creation response and instance details
     """
+    if not config.script.endswith(".py"):
+        config.script = f"{config.script}.py"
+
+    if not config.script_config.endswith(".yml"):
+        config.script_config = f"{config.script_config}.yml"
+
     logging.info(f"Creating hummingbot instance with config: {config}")
     response = docker_manager.create_hummingbot_instance(config)
 
