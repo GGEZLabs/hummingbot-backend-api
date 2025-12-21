@@ -14,7 +14,11 @@ from pydantic import Field, field_validator
 class VolumeMonitorConfig(BaseClientModel):
     script_file_name: str = os.path.basename(__file__)
     trading_pair: str = Field(
-        "GGEZ1-USDT", json_schema_extra={"prompt": lambda mi: "trading pair to monitor", "prompt_on_new": True}
+        "GGEZ1-USDT",
+        json_schema_extra={
+            "prompt": lambda mi: "trading pair to monitor",
+            "prompt_on_new": True,
+        },
     )
     exchanges: List[str] = Field(
         ["p2b", "coinstore", "uzx"],
@@ -23,9 +27,19 @@ class VolumeMonitorConfig(BaseClientModel):
             "prompt_on_new": True,
         },
     )
-    refresh_time: int = Field(300, json_schema_extra={"prompt": lambda mi: "refresh time in seconds", "prompt_on_new": True})
+    refresh_time: int = Field(
+        300,
+        json_schema_extra={
+            "prompt": lambda mi: "refresh time in seconds",
+            "prompt_on_new": True,
+        },
+    )
     volume_threshold: Decimal = Field(
-        50000, json_schema_extra={"prompt": lambda mi: "volume threshold in (quote)", "prompt_on_new": True}
+        50000,
+        json_schema_extra={
+            "prompt": lambda mi: "volume threshold in (quote)",
+            "prompt_on_new": True,
+        },
     )
 
     @field_validator("exchanges", mode="before")
@@ -79,7 +93,7 @@ class VolumeMonitor(ScriptStrategyBase):
             if volume < self.config.volume_threshold:
                 self.logger().notify(f"\n⚠️Warning⚠️:\nVolume is below the threshold ({volume}) on {exchange}")
 
-            await asyncio.sleep(self.config.refresh_time)
+        await asyncio.sleep(self.config.refresh_time)
 
     def format_status(self) -> str:
         text = ""
