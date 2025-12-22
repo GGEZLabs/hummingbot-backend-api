@@ -89,9 +89,11 @@ class VolumeMonitor(ScriptStrategyBase):
     async def check_volume(self):
         for exchange in self.config.exchanges:
             volume = await self.connectors[exchange].get_volume(self.config.trading_pair)
+            last_volume = self.last_volumes.get(exchange)
             self.last_volumes[exchange] = volume
             if volume < self.config.volume_threshold:
-                self.logger().notify(f"\n⚠️Warning⚠️:\nVolume is below the threshold ({volume}) on {exchange}")
+                if last_volume is None or volume <= last_volume:
+                    self.logger().notify(f"\n⚠️Warning⚠️:\nVolume is below the threshold ({volume}) on {exchange}")
 
         await asyncio.sleep(self.config.refresh_time)
 
@@ -103,7 +105,8 @@ class VolumeMonitor(ScriptStrategyBase):
             if exchange not in self.last_volumes:
                 continue
             current_volumes += f"\n{exchange}: {self.last_volumes[exchange]} {self.config.trading_pair.split('-')[1]}"
-            current_prices += f"\n{exchange}: {self.connectors[exchange].get_mid_price(self.config.trading_pair)} {
-                                            self.config.trading_pair.split('-')[0]}"
+            current_prices += f"\n{exchange}: {
+                self.connectors[exchange].get_mid_price(self.config.trading_pair)
+            } {self.config.trading_pair.split('-')[0]}"
 
         return text + f"\n\n{current_volumes}\n\n{current_prices}"
