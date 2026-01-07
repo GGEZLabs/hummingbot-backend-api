@@ -14,11 +14,7 @@ from pydantic import Field, field_validator
 class VolumeMonitorConfig(BaseClientModel):
     script_file_name: str = os.path.basename(__file__)
     trading_pair: str = Field(
-        "GGEZ1-USDT",
-        json_schema_extra={
-            "prompt": lambda mi: "trading pair to monitor",
-            "prompt_on_new": True,
-        },
+        "GGEZ1-USDT", json_schema_extra={"prompt": lambda mi: "trading pair to monitor", "prompt_on_new": True}
     )
     exchanges: List[str] = Field(
         ["p2b", "coinstore", "uzx"],
@@ -27,19 +23,9 @@ class VolumeMonitorConfig(BaseClientModel):
             "prompt_on_new": True,
         },
     )
-    refresh_time: int = Field(
-        300,
-        json_schema_extra={
-            "prompt": lambda mi: "refresh time in seconds",
-            "prompt_on_new": True,
-        },
-    )
+    refresh_time: int = Field(300, json_schema_extra={"prompt": lambda mi: "refresh time in seconds", "prompt_on_new": True})
     volume_threshold: Decimal = Field(
-        50000,
-        json_schema_extra={
-            "prompt": lambda mi: "volume threshold in (quote)",
-            "prompt_on_new": True,
-        },
+        50000, json_schema_extra={"prompt": lambda mi: "volume threshold in (quote)", "prompt_on_new": True}
     )
 
     @field_validator("exchanges", mode="before")
@@ -101,12 +87,17 @@ class VolumeMonitor(ScriptStrategyBase):
         text = ""
         current_volumes = "Current Volumes: "
         current_prices = "Current Prices: "
+        total_volume = 0
+        total_price = 0
+        avg_price = 0
         for exchange in self.config.exchanges:
             if exchange not in self.last_volumes:
                 continue
             current_volumes += f"\n{exchange}: {self.last_volumes[exchange]} {self.config.trading_pair.split('-')[1]}"
-            current_prices += f"\n{exchange}: {
-                self.connectors[exchange].get_mid_price(self.config.trading_pair)
-            } {self.config.trading_pair.split('-')[0]}"
+            price = self.connectors[exchange].get_mid_price(self.config.trading_pair)
+            current_prices += f"\n{exchange}: {price} {self.config.trading_pair.split('-')[0]}"
+            total_volume += self.last_volumes[exchange]
+            total_price += price
 
-        return text + f"\n\n{current_volumes}\n\n{current_prices}"
+        avg_price = total_price / len(self.config.exchanges)
+        return text + f"\n\n{current_volumes}\nTotal Volume: {total_volume}\n\n{current_prices}\nAverage Price: {avg_price}"
