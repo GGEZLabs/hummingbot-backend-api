@@ -1,14 +1,86 @@
 import json
-from typing import Dict, List
+import logging
+from typing import Any, Dict, List, Set
 
 import yaml
 from fastapi import APIRouter, HTTPException
+from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
+from pydantic import SecretStr
 from starlette import status
 
+from config import settings
 from models import Script
 from utils.file_system import fs_util
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["Scripts"], prefix="/scripts")
+
+
+def get_secure_fields_from_config_class(script_name: str) -> Set[str]:
+    """
+    Load the script's config class and return field names that have is_secure=True.
+    """
+    config_class = fs_util.load_script_config_class(script_name)
+    if config_class is None:
+        return set()
+
+    secure_fields = set()
+    for field_name, field_info in config_class.model_fields.items():
+        # Check if field type is SecretStr
+        if field_info.annotation == SecretStr:
+            secure_fields.add(field_name)
+        # Check json_schema_extra for is_secure flag
+        if field_info.json_schema_extra and isinstance(field_info.json_schema_extra, dict):
+            if field_info.json_schema_extra.get("is_secure", False):
+                secure_fields.add(field_name)
+    return secure_fields
+
+
+def encrypt_secure_fields(config: Dict[str, Any], secure_fields: Set[str]) -> Dict[str, Any]:
+    """
+    Encrypt fields that are marked as secure.
+    """
+    if not secure_fields:
+        return config
+
+    secrets_manager = ETHKeyFileSecretManger(password=settings.security.config_password)
+    encrypted_config = config.copy()
+
+    for field_name in secure_fields:
+        if field_name in encrypted_config and encrypted_config[field_name]:
+            clear_value = encrypted_config[field_name]
+            # Only encrypt if it's a string and not already encrypted
+            if isinstance(clear_value, str) and clear_value:
+                encrypted_value = secrets_manager.encrypt_secret_value(field_name, clear_value)
+                encrypted_config[field_name] = encrypted_value
+                logger.info(f"Encrypted secure field: {field_name}")
+
+    return encrypted_config
+
+
+def decrypt_secure_fields(config: Dict[str, Any], secure_fields: Set[str]) -> Dict[str, Any]:
+    """
+    Decrypt fields that are marked as secure.
+    """
+    if not secure_fields:
+        return config
+
+    secrets_manager = ETHKeyFileSecretManger(password=settings.security.config_password)
+    decrypted_config = config.copy()
+
+    for field_name in secure_fields:
+        if field_name in decrypted_config and decrypted_config[field_name]:
+            encrypted_value = decrypted_config[field_name]
+            if isinstance(encrypted_value, str) and encrypted_value:
+                try:
+                    decrypted_value = secrets_manager.decrypt_secret_value(field_name, encrypted_value)
+                    decrypted_config[field_name] = decrypted_value
+                except Exception as e:
+                    # If decryption fails, the value might not be encrypted (legacy data)
+                    logger.warning(f"Could not decrypt field {field_name}: {e}")
+
+    return decrypted_config
 
 
 @router.get("/", response_model=List[str])
@@ -27,6 +99,7 @@ async def list_scripts():
 async def list_script_configs():
     """
     List all script configurations with metadata.
+    Secure fields are masked for security in the list view.
 
     Returns:
         List of script configuration objects with name, script_file_name, and other metadata
@@ -40,6 +113,16 @@ async def list_script_configs():
             try:
                 config = fs_util.read_yaml_file(f"conf/scripts/{config_file}")
                 config["config_name"] = config_name
+
+                # Mask secure fields in list view for security
+                script_file_name = config.get("script_file_name", "")
+                if script_file_name:
+                    script_name = script_file_name.replace(".py", "")
+                    secure_fields = get_secure_fields_from_config_class(script_name)
+                    for field in secure_fields:
+                        if field in config and config[field]:
+                            config[field] = "********"
+
                 configs.append(config)
             except Exception as e:
                 # If config is malformed, still include it with basic info
@@ -59,13 +142,22 @@ async def get_script_config(config_name: str):
         config_name: Name of the configuration file to retrieve
 
     Returns:
-        Dictionary with script configuration
+        Dictionary with script configuration (secure fields decrypted)
 
     Raises:
         HTTPException: 404 if configuration not found
     """
     try:
         config = fs_util.read_yaml_file(f"conf/scripts/{config_name}.yml")
+
+        # Decrypt secure fields before returning
+        script_file_name = config.get("script_file_name", "")
+        if script_file_name:
+            script_name = script_file_name.replace(".py", "")
+            secure_fields = get_secure_fields_from_config_class(script_name)
+            if secure_fields:
+                config = decrypt_secure_fields(config, secure_fields)
+
         return config
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Configuration '{config_name}' not found")
@@ -87,10 +179,22 @@ async def create_or_update_script_config(config_name: str, config: Dict):
         HTTPException: 400 if save error occurs
     """
     try:
+        # Get script name from config to load the config class
+        script_file_name = config.get("script_file_name", "")
+        if script_file_name:
+            # Remove .py extension if present
+            script_name = script_file_name.replace(".py", "")
+            # Get secure fields from the script's config class
+            secure_fields = get_secure_fields_from_config_class(script_name)
+            if secure_fields:
+                # Encrypt secure fields before saving
+                config = encrypt_secure_fields(config, secure_fields)
+
         yaml_content = yaml.dump(config, default_flow_style=False)
         fs_util.add_file("conf/scripts", f"{config_name}.yml", yaml_content, override=True)
         return {"message": f"Configuration '{config_name}' saved successfully"}
     except Exception as e:
+        logger.error(f"Error saving script config: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
