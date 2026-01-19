@@ -3,73 +3,79 @@ import random
 import time
 from typing import Dict, List
 
-from hummingbot.client.config.config_data_types import BaseClientModel, ClientFieldData
+from hummingbot.client.config.config_data_types import BaseClientModel
 from hummingbot.connector.connector_base import ConnectorBase
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
 from hummingbot.strategy_v2.utils.cosmos_grpc_client import CosmosGrpcClient
-from pydantic import Field, validator
+from pydantic import Field, SecretStr, field_validator
 
 
 class RandomTransactionConfig(BaseClientModel):
     script_file_name: str = Field(default_factory=lambda: os.path.basename(__file__))
     chain_id: str = Field(
-        "ggezchain",
-        client_data=ClientFieldData(prompt_on_new=True, prompt=lambda mi: "chain ID"),
+        default="ggezchain",
+        json_schema_extra={
+            "prompt": "Enter chain ID",
+            "prompt_on_new": True,
+        },
     )
     grpc_url: str = Field(
-        "172.21.10.116:9090",
-        client_data=ClientFieldData(prompt_on_new=True, prompt=lambda mi: "GRPC endpoint"),
+        default="172.21.10.116:9090",
+        json_schema_extra={
+            "prompt": "Enter GRPC endpoint",
+            "prompt_on_new": True,
+        },
     )
     denom: str = Field(
-        "uggez1",
-        client_data=ClientFieldData(prompt_on_new=True, prompt=lambda mi: "Denom"),
+        default="uggez1",
+        json_schema_extra={
+            "prompt": "Enter token denom",
+            "prompt_on_new": True,
+        },
     )
-    mnemonic_keys_with_addresses: List[Dict[str, str]] = Field(
-        default=[],
-        client_data=ClientFieldData(
-            prompt_on_new=True,
-            prompt=lambda mi: (
-                "Enter the mnemonic keys with addresses in the format: " "'mnemonic1:address1,mnemonic2:address2,...'"
-            ),
-        ),
+    mnemonic_keys_with_addresses: SecretStr = Field(
+        default=...,
+        json_schema_extra={
+            "prompt": "Enter mnemonic keys with addresses (format: 'mnemonic1:address1,mnemonic2:address2,...')",
+            "prompt_on_new": True,
+            "is_secure": True,
+        },
     )
     min_tx_amount: int = Field(
-        1_000_000,
-        client_data=ClientFieldData(prompt_on_new=True, prompt=lambda mi: "Minimum transaction amount (uggez1)"),
+        default=1_000_000,
+        json_schema_extra={
+            "prompt": "Enter minimum transaction amount (uggez1)",
+            "prompt_on_new": True,
+        },
     )
     max_tx_amount: int = Field(
-        3_000_000,
-        client_data=ClientFieldData(prompt_on_new=True, prompt=lambda mi: "Maximum transaction amount (uggez1)"),
+        default=3_000_000,
+        json_schema_extra={
+            "prompt": "Enter maximum transaction amount (uggez1)",
+            "prompt_on_new": True,
+        },
     )
     min_delay: int = Field(
-        60,
-        client_data=ClientFieldData(prompt_on_new=True, prompt=lambda mi: "Minimum delay in seconds"),
+        default=60,
+        json_schema_extra={
+            "prompt": "Enter minimum delay in seconds",
+            "prompt_on_new": True,
+        },
     )
     max_delay: int = Field(
-        900,
-        client_data=ClientFieldData(prompt_on_new=True, prompt=lambda mi: "Maximum delay in seconds"),
+        default=900,
+        json_schema_extra={
+            "prompt": "Enter maximum delay in seconds",
+            "prompt_on_new": True,
+        },
     )
 
-    @validator("mnemonic_keys_with_addresses", pre=True, allow_reuse=True, always=True)
-    def validate_mnemonic_keys(cls, v):
+    @field_validator("mnemonic_keys_with_addresses", mode="before")
+    @classmethod
+    def convert_to_secret_str(cls, v):
+        """Convert string input to SecretStr."""
         if isinstance(v, str):
-            mnemonic_list = v.split(",")
-            mnemonic_objects = []
-            for item in mnemonic_list:
-                try:
-                    mnemonic, address = item.split(":")
-                    mnemonic_objects.append({"key": mnemonic.strip(), "address": address.strip()})
-                except ValueError:
-                    raise ValueError(
-                        "Invalid format. Please provide input in the format: " "'mnemonic1:address1,mnemonic2:address2,...'"
-                    )
-                if len(mnemonic_objects) < 2:
-                    raise ValueError("At least two mnemonic keys with addresses are required.")
-            return mnemonic_objects
-        elif isinstance(v, list):
-            if len(v) < 2:
-                raise ValueError("At least two mnemonic keys with addresses are required.")
-            return v
+            return SecretStr(v)
         return v
 
 
@@ -87,8 +93,27 @@ class RandomTransaction(ScriptStrategyBase):
         )
         self.last_tx_timestamp = 0
         self.current_random_delay = 0
-        self.accounts = [{"key": entry["key"], "address": entry["address"]} for entry in self.config.mnemonic_keys_with_addresses]
+        # Parse the decrypted mnemonic string into accounts list
+        self.accounts = self._parse_mnemonics(self.config.mnemonic_keys_with_addresses.get_secret_value())
+        if len(self.accounts) < 2:
+            raise ValueError("At least two mnemonic keys with addresses are required.")
         self.cumulating_transactions = self.cumulating_transactions()
+
+    def _parse_mnemonics(self, raw: str) -> List[Dict[str, str]]:
+        """Parse mnemonic:address pairs from the decrypted string."""
+        if not raw:
+            return []
+        accounts = []
+        for item in raw.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            try:
+                mnemonic, address = item.split(":")
+                accounts.append({"key": mnemonic.strip(), "address": address.strip()})
+            except ValueError:
+                raise ValueError(f"Invalid format for '{item}'. Use: 'mnemonic1:address1,mnemonic2:address2,...'")
+        return accounts
 
     @property
     def is_ready_to_do_tx(self):
@@ -175,16 +200,19 @@ class RandomTransaction(ScriptStrategyBase):
         denom = self.config.denom[1:]
         tsx_info = (
             f"\nStrategy Config :"
-            f"\nTransaction Amount Range: {self.convert_from_micro_denom_to_denom(
-                self.config.min_tx_amount)} - {self.convert_from_micro_denom_to_denom(self.config.max_tx_amount)} {denom}"
-            f"\nDelay Order Time: {self.config.min_delay} seconds + Random Delay: 0 - {self.config.max_delay} seconds"
+            f"\nTransaction Amount Range: {
+                self.convert_from_micro_denom_to_denom(self.config.min_tx_amount)} - {
+                    self.convert_from_micro_denom_to_denom(self.config.max_tx_amount)} {denom}"
+            f"\nDelay Order Time: {
+                self.config.min_delay} seconds + Random Delay: 0 - {self.config.max_delay} seconds"
             f"\nNumber of Accounts: {len(self.accounts)}"
             "\n"
             "\nTotal Cumulating Transactions:"
             f"\nTotal Transactions: {self.cumulating_transactions.total_transactions}"
             f"\nTotal Amount: {self.convert_from_micro_denom_to_denom(self.cumulating_transactions.total_amount)} {denom}"
-            f"\nAverage Amount: {self.convert_from_micro_denom_to_denom(
-                self.cumulating_transactions.total_amount / self.cumulating_transactions.total_transactions)} {denom}"
+            f"\nAverage Amount: {
+                self.convert_from_micro_denom_to_denom(
+                    self.cumulating_transactions.total_amount / self.cumulating_transactions.total_transactions)} {denom}"
             "\n"
             "\nCumulating Transactions by Account:"
         )
@@ -199,8 +227,9 @@ class RandomTransaction(ScriptStrategyBase):
             else:
                 tsx_info += f"\nTotal Transactions: {cumulating_transactions['count']}"
                 tsx_info += f"\nTotal Amount: {self.convert_from_micro_denom_to_denom(cumulating_transactions['total'])} {denom}"
-                tsx_info += f"\nAverage Amount: {self.convert_from_micro_denom_to_denom(
-                    cumulating_transactions['total'] / cumulating_transactions['count'])} {denom}"
+                tsx_info += f"\nAverage Amount: {
+                    self.convert_from_micro_denom_to_denom(
+                        cumulating_transactions['total'] / cumulating_transactions['count'])} {denom}"
 
         return tsx_info
 
