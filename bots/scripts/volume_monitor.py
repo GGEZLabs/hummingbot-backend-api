@@ -75,12 +75,15 @@ class VolumeMonitor(ScriptStrategyBase):
 
     async def check_volume(self):
         for exchange in self.config.exchanges:
-            volume = await self.connectors[exchange].get_volume(self.config.trading_pair)
-            last_volume = self.last_volumes.get(exchange)
-            self.last_volumes[exchange] = volume
-            if volume < self.config.volume_threshold:
-                if last_volume is None or volume <= last_volume:
-                    self.logger().notify(f"\n⚠️Warning⚠️:\nVolume is below the threshold ({volume}) on {exchange}")
+            try:
+                volume = await self.connectors[exchange].get_volume(self.config.trading_pair)
+                last_volume = self.last_volumes.get(exchange)
+                self.last_volumes[exchange] = volume
+                if volume < self.config.volume_threshold:
+                    if last_volume is None or volume <= last_volume:
+                        self.logger().notify(f"\n⚠️Warning⚠️:\nVolume is below the threshold ({volume}) on {exchange}")
+            except Exception as e:
+                self.logger().error(f"Error checking volume for {exchange}: {e}")
 
         await asyncio.sleep(self.config.refresh_time)
 
@@ -103,6 +106,6 @@ class VolumeMonitor(ScriptStrategyBase):
         avg_price = total_price / len(self.config.exchanges)
         return (
             text
-            + f"\n\n{current_volumes}\nTotal Volume: {total_volume}\n\n{current_prices}"
-            + f"\nAverage Price: {round(avg_price, 6)} {self.quote}"
+            + f"\n\n{current_volumes}\nTotal Volume: {total_volume}\n\n{current_prices}\nAverage Price: {
+                round(avg_price, 6)} {self.quote}"
         )

@@ -200,19 +200,17 @@ class RandomTransaction(ScriptStrategyBase):
         denom = self.config.denom[1:]
         tsx_info = (
             f"\nStrategy Config :"
-            f"\nTransaction Amount Range: {
-                self.convert_from_micro_denom_to_denom(self.config.min_tx_amount)} - {
-                    self.convert_from_micro_denom_to_denom(self.config.max_tx_amount)} {denom}"
-            f"\nDelay Order Time: {
-                self.config.min_delay} seconds + Random Delay: 0 - {self.config.max_delay} seconds"
+            f"\nTransaction Amount Range: {self.convert_from_micro_denom_to_denom(
+                self.config.min_tx_amount)} - {self.convert_from_micro_denom_to_denom(
+                    self.config.max_tx_amount)} {denom}"
+            f"\nDelay Order Time: {self.config.min_delay} seconds + Random Delay: 0 - {self.config.max_delay} seconds"
             f"\nNumber of Accounts: {len(self.accounts)}"
             "\n"
             "\nTotal Cumulating Transactions:"
             f"\nTotal Transactions: {self.cumulating_transactions.total_transactions}"
             f"\nTotal Amount: {self.convert_from_micro_denom_to_denom(self.cumulating_transactions.total_amount)} {denom}"
-            f"\nAverage Amount: {
-                self.convert_from_micro_denom_to_denom(
-                    self.cumulating_transactions.total_amount / self.cumulating_transactions.total_transactions)} {denom}"
+            f"\nAverage Amount: {self.convert_from_micro_denom_to_denom(
+                self.cumulating_transactions.total_amount / self.cumulating_transactions.total_transactions)} {denom}"
             "\n"
             "\nCumulating Transactions by Account:"
         )
@@ -227,9 +225,8 @@ class RandomTransaction(ScriptStrategyBase):
             else:
                 tsx_info += f"\nTotal Transactions: {cumulating_transactions['count']}"
                 tsx_info += f"\nTotal Amount: {self.convert_from_micro_denom_to_denom(cumulating_transactions['total'])} {denom}"
-                tsx_info += f"\nAverage Amount: {
-                    self.convert_from_micro_denom_to_denom(
-                        cumulating_transactions['total'] / cumulating_transactions['count'])} {denom}"
+                tsx_info += f"\nAverage Amount: {self.convert_from_micro_denom_to_denom(
+                    cumulating_transactions['total'] / cumulating_transactions['count'])} {denom}"
 
         return tsx_info
 
