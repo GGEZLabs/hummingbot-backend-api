@@ -1,6 +1,7 @@
 services:
   hummingbot-api:
     container_name: hummingbot-api
+    image: public.ecr.aws/s2m1f3k2/ggezlabs/hummingbot-backend-api:2.7.0
     build:
       context: .. # Use the parent directory (hummingbot_setup_2.7) as the context
       dockerfile: hummingbot-backend-api/Dockerfile
